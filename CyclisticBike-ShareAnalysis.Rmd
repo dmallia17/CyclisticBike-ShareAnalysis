@@ -4,7 +4,46 @@ author: "Daniel Mallia"
 output: html_notebook
 ---
 
+# Purpose
+This R notebook contains my end-to-end work on the Cyclistic bike-share case
+study, performed as a "capstone" project for Google's excellent Data Analytics
+certificate program on Coursera.
+
+The Google program recommends a data analysis process of 6 steps: ask, prepare,
+process, analyze, share and act.
+Accordingly, this notebook is structured
+around those steps.
+
+Please note that some inspiration for the below work comes from an R script,
+which was provided in the course and is based on 
+[this blog](https://artscience.blog/home/divvy-dataviz-case-study).
+
 # 1. Ask
+Let's start by briefly spelling out the (fictional) scenario for this case study
+for some context.
+I am a junior data analyst (woohoo!) on the marketing analyst team at Cyclistic,
+a bike-sharing company in Chicago.
+Following the conclusion from the finance analysts at Cyclistic that annual
+memberships are more profitable than **casual riders** (who use single ride or
+day passes), the director of marketing wants to work on converting casual riders
+into **Cyclistic members** who have an annual membership.
+This is motivated by the idea that these casual consumers are already aware of
+Cyclistic, and may be drawn by the company's offerings of alternative bike types
+suitable for those for disabilities.
+To support this initiative, the key question for my work to answer with data, is
+how do casual riders differ from those with annual memberships?
+
+### Business Task
+Make use of the company's historical bike trip data to understand differences
+between casual riders and those with annual memberships, and thereby unlock
+insights and recommendations for a marketing program designed to convert casual
+riders into Cyclistic members.
+
+### Key Stakeholders
+- Lily Moreno (Director of Marketing, and my manager)
+- Marketing Analytics Team (my colleagues)
+- Executive Team (company executives, who have final say on the proposed
+marketing program)
 
 # 2. Prepare
 
