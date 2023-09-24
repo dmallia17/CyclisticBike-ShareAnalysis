@@ -4,6 +4,13 @@ author: "Daniel Mallia"
 output: html_notebook
 ---
 
+```{r Imports}
+# Note this attaches ggplot2, lubridate, readr, stringr and tidyr
+library(tidyverse)
+library(skimr)
+```
+
+
 # Purpose
 This R notebook contains my end-to-end work on the Cyclistic bike-share case
 study, performed as a "capstone" project for Google's excellent Data Analytics
@@ -46,6 +53,151 @@ riders into Cyclistic members.
 marketing program)
 
 # 2. Prepare
+### Original Data Organization and Data Retrieval
+Because Cyclistic is a fictional company, we are making use of Divvy trip
+datasets made publicly available
+[here](https://divvy-tripdata.s3.amazonaws.com/index.html) under
+[this license](https://www.divvybikes.com/data-license-agreement).
+A quick glance at this data repository reveals that the data format has changed
+over time, with ride data offered first (in 2013) with a file for a full year,
+then in per quarter segments, and then currently by month.
+Moreover, the naming scheme has changed in accordance with some of these
+changes, and consequently the index is not in chronological order.
+
+For purposes of this analysis, we will work with the most recent full year's
+worth of data, the 2022 data.
+This requires downloading the 12 files which constitute the 2022 collection.
+We will store the original csv files in a subdirectory called "data".
+
+```{r Retrieve Data, message=FALSE, warning=FALSE}
+src_dir <- getwd()
+dir.create("data")
+setwd(paste0(src_dir,"/data"))
+
+for(i in 1:12){
+  padded_i <- str_pad(i, 2, pad="0")
+  temp_url <- sprintf(
+    "https://divvy-tripdata.s3.amazonaws.com/2022%s-divvy-tripdata.zip",
+    padded_i)
+  destfile <- sprintf("2022%s-divvy-tripdata.zip", padded_i)
+  download.file(temp_url, destfile=destfile)
+  unzip(destfile)
+  file.remove(destfile)
+  file.remove("__MACOSX")
+}
+```
+
+### General Characteristics of the Data
+Even before opening a single file, we can make a couple of observations about
+the nature of the data we have to work with.
+This would constitute **first party data** as (in our fictional scenario) this
+is our company's data.
+In a real-world scenario, we would ensure that we are retrieving the data
+directly from a company source and verifying with data engineers or other
+analysts, that this is the correct and up-to-date data.
+Nonetheless, we should treat this data as any other, and perform checks both
+statistical and visual to ensure data integrity and catch errors.
+Simple storage in a sub-directory for our analysis is fine for these purposes;
+as we combine data and produce a larger file for the full year's analysis, we
+will want to follow good naming conventions and maintain a changelog.
+
+We will be reviewing a full year's worth of data, which should negate the bias
+that might arise from seasonal behavior (though we will want to consider
+seasonal trends in our analysis).
+Moreover, the data is from 2022, which is both recent (always important, but
+particularly the case for bike-sharing which is a more recent and growing
+trend) and after the major COVID shutdowns, so we should see behavior that is
+representative of the present behavior of Cyclistic customers.
+It is worth acknowledging that this data is, of course, limited to Cyclistic
+customers - and thereby, bike-sharing in a purely Chicago context - so we would
+need to be cautious in generalizing outside of the company or to other
+localities, but it should be appropriate given our task of considering
+differences between *Cyclistic* casual riders and members.
+
+### Inspection of the Data
+To dig further, it is time to actually open the files and begin to look for
+issues, and compile a file with the full year's worth of data.
+
+One of the files is named "publictripdata" instead of "tripdata", but we can
+quickly make that consistent:
+```{r}
+file.rename("data/202209-divvy-publictripdata.csv",
+            "data/202209-divvy-tripdata.csv")
+```
+
+
+```{r}
+tripdata_by_month <- list()
+for(i in 1:12){
+  padded_i <- str_pad(i, 2, pad="0")
+  csv_name <- sprintf("data/2022%s-divvy-tripdata.csv", padded_i)
+  curr_data <- read_csv(csv_name)
+  # Preserve the month as a column in each dataframe
+  curr_data$month <- i
+  tripdata_by_month[[i]] <- curr_data
+}
+```
+
+The nice thing about reading in csv files with readr is we get a quick
+summary, giving rows, columns, the delimiter detected, the titles of columns and
+their detected types.
+Nonetheless, before we try to combine them into a single dataframe, let's check
+all column names are identical.
+```{r}
+# Check that all column names are identical
+trip_colnames <- colnames(tripdata_by_month[[1]])
+print(paste("All column names identical:",
+  all(sapply(tripdata_by_month, function(x) {identical(colnames(x), trip_colnames)}))))
+```
+
+Let's also take a look at the details of at least one month's data.
+It would be best to do this for every month but for time and space
+considerations, plus the fact that we can perform some checks better in a visual
+fashion, we can just run it for January:
+```{r}
+skim_without_charts(tripdata_by_month[[1]])
+```
+
+This output gives us an overall summary of the dataframe, and then statistics
+for the character type columns, numeric type columns and finally date type
+columns.
+
+To inspect some values, let's use glimpse:
+```{r}
+glimpse(tripdata_by_month[[1]])
+```
+
+We can see we have a ride id, a rideable type (the type of vehicle, such as
+"electric_bike" or "classic_bike"), the start and end times of rides (note that
+we actually have an end time in February, the "max" time for the January data),
+start and end station names and ids, start and end latitudes and longitudes,
+annd whether or not the rider was a member or a "casual" rider.
+Of course, we also have the month column we added in earlier.
+
+We can quickly check the unique values for rideable_type and member_casual:
+```{r}
+print(unique(tripdata_by_month[[1]]$rideable_type))
+print(unique(tripdata_by_month[[1]]$member_casual))
+```
+
+**NOTE** Two other items jump out here:
+
+- We have missing values for station names and ids, as well as trip end latitude
+and longtidue...
+
+- We have 103770 rows and 103770 unique ride ids, so all seems well for January,
+but we should check this holds for all other months.
+
+For our final step, let's combine the dataframes into one:
+```{r}
+all_tripdata <- bind_rows(tripdata_by_month)
+```
+
+We can save this result as a file, so we don't need to repeat these steps in
+the future.
+```{r}
+write_csv(all_tripdata, "2022-divvy-tripdata-V01.csv")
+```
 
 # 3. Process
 
