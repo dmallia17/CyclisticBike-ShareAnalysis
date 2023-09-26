@@ -4,10 +4,14 @@ author: "Daniel Mallia"
 output: html_notebook
 ---
 
-```{r Imports}
-# Note this attaches ggplot2, lubridate, readr, stringr and tidyr
+```{r Imports, message=FALSE}
+# Note this attaches ggplot2, lubridate, readr, stringr, dplyr and tidyr
 library(tidyverse)
 library(skimr)
+library(naniar)
+
+# Set this to false if you want to download everything for the first time
+DOWNLOADED <- TRUE
 ```
 
 
@@ -70,20 +74,22 @@ This requires downloading the 12 files which constitute the 2022 collection.
 We will store the original csv files in a subdirectory called "data".
 
 ```{r Retrieve Data, message=FALSE, warning=FALSE}
-src_dir <- getwd()
-dir.create("data")
-setwd(paste0(src_dir,"/data"))
+if(!DOWNLOADED) {
+  src_dir <- getwd()
+  dir.create("data")
+  setwd(paste0(src_dir,"/data"))
 
-for(i in 1:12){
-  padded_i <- str_pad(i, 2, pad="0")
-  temp_url <- sprintf(
-    "https://divvy-tripdata.s3.amazonaws.com/2022%s-divvy-tripdata.zip",
-    padded_i)
-  destfile <- sprintf("2022%s-divvy-tripdata.zip", padded_i)
-  download.file(temp_url, destfile=destfile)
-  unzip(destfile)
-  file.remove(destfile)
-  file.remove("__MACOSX")
+  for(i in 1:12){
+    padded_i <- str_pad(i, 2, pad="0")
+    temp_url <- sprintf(
+      "https://divvy-tripdata.s3.amazonaws.com/2022%s-divvy-tripdata.zip",
+      padded_i)
+    destfile <- sprintf("2022%s-divvy-tripdata.zip", padded_i)
+    download.file(temp_url, destfile=destfile)
+    unzip(destfile)
+    file.remove(destfile)
+    file.remove("__MACOSX")
+  }
 }
 ```
 
@@ -121,8 +127,10 @@ issues, and compile a file with the full year's worth of data.
 One of the files is named "publictripdata" instead of "tripdata", but we can
 quickly make that consistent:
 ```{r}
-file.rename("data/202209-divvy-publictripdata.csv",
-            "data/202209-divvy-tripdata.csv")
+if(!DOWNLOADED){
+  file.rename("data/202209-divvy-publictripdata.csv",
+              "data/202209-divvy-tripdata.csv")
+}
 ```
 
 
@@ -131,10 +139,7 @@ tripdata_by_month <- list()
 for(i in 1:12){
   padded_i <- str_pad(i, 2, pad="0")
   csv_name <- sprintf("data/2022%s-divvy-tripdata.csv", padded_i)
-  curr_data <- read_csv(csv_name)
-  # Preserve the month as a column in each dataframe
-  curr_data$month <- i
-  tripdata_by_month[[i]] <- curr_data
+  tripdata_by_month[[i]] <- read_csv(csv_name)
 }
 ```
 
@@ -171,7 +176,7 @@ We can see we have a ride id, a rideable type (the type of vehicle, such as
 "electric_bike" or "classic_bike"), the start and end times of rides (note that
 we actually have an end time in February, the "max" time for the January data),
 start and end station names and ids, start and end latitudes and longitudes,
-annd whether or not the rider was a member or a "casual" rider.
+and whether or not the rider was a member or a "casual" rider.
 Of course, we also have the month column we added in earlier.
 
 We can quickly check the unique values for rideable_type and member_casual:
@@ -200,8 +205,268 @@ write_csv(all_tripdata, "2022-divvy-tripdata-V01.csv")
 ```
 
 # 3. Process
+Now we can begin work on all of our 2022 data, getting some sense of the nature
+and quality of the data, extracting additional features (columns) and cleaning
+data as need be.
+
+First, we can reload the data, if needed.
+```{r}
+defined <- ls()
+if(!("all_tripdata" %in% defined)) {
+  all_tripdata <- read_csv("2022-divvy-tripdata-V01.csv")
+}
+```
+
+Next, let's take a quick look at the top or *head* of the dataset for a
+refresh on content.
+```{r}
+head(all_tripdata)
+```
+
+From this we can see we have 13 columns, how about the number of rows for 2022
+combined?
+Again, we can use skim_without_charts to check this and retrieve a lot more
+information all in one call.
+```{r}
+skim_without_charts(all_tripdata)
+```
+
+It looks like all told, we have over 5 million trips to analyze!
+That's a nice sample size, one which would likely be overwhelming for
+spreadsheet software (Excel / Google Sheets) so it's a good thing we are using
+R (though SQL would also be a good option here).
+
+Let's look over the results column by column to get to know the data better.
+
+### Categorical Data
+#### ride_id
+These are 16 character long ids, and it there are (thankfully) as many unique
+ids as there are rows in the data.
+
+#### rideable_type
+These give us the actual type of vehicles used; let's see a quick breakdown by
+type.
+```{r}
+table(all_tripdata$rideable_type)
+```
+Classic and electric bikes clearly make up the vast majority of the data.
+The [Divvy website](https://divvybikes.com/system-data) doesn't explain what
+a docked bike is, but it sounds like this may not be a normal ride?
+We will revisit this below.
+
+#### Station names and ids
+Per the names, these are the names (strings) of stations and the ids assigned
+to them.
+Around 15% of the data is missing here; if we peek ahead, we can see that we
+have the majority of latitude and longitude data, so it is certainly not a good
+idea to simply discard rows missing these values, particularly when, if desired,
+we may be able to recover the correct values using latitude and longitude.
+The frequency of missingness seems consistent across name and id, so if we're
+missing one, we are missing the other, but we can also check that to be
+100% sure.
+```{r}
+print(paste("Number missing both start name and id:",
+  nrow(all_tripdata %>%
+    filter(is.na(start_station_name) & is.na(start_station_id)))))
+print(paste("Number missing both end name and id:",
+  nrow(all_tripdata %>%
+    filter(is.na(end_station_name) & is.na(end_station_id)))))
+```
+
+Interestingly, there are considerably more names than ids, and a few more end
+ids than start ids.
+If we have time, we can revisit this to see if we have misspelled (and therefore
+duplicated) station names, but this assumes we want to make use of the names.
+
+#### member_casual
+This identifies whether or not the ride was by a member or a casual rider
+(hence only 2 unique values); let's check the breakdown.
+```{r}
+table(all_tripdata$member_casual)
+prop.table(table(all_tripdata$member_casual))
+```
+Excellent, while the data does skew in favor of members (~60/40), we also have
+quite a sample of casual riders.
+
+### Numerical and Date data
+#### Start and end latitude and longitudes
+What these offer is no surprise.
+As mentioned above, there is a small amount of missingness for end locations;
+once we have considered other information we can extract, we'll likely want to
+come back and remove any remaining such cases given that we want full rides and
+that there are so few cases.
+
+#### Start and end datetimes
+Again, per the name, these give us full datetime (year, month, day, hour,
+minute, second) for a ride's start and stop.
+As we saw with the January data, the max value actually exceeds 2022, as least
+one person rode into the new year!
+Thankfully, there is no missingness here; this is great news given that we can
+make use of these columns to calculate ride durations (not present in these
+files).
+We can also unpack these further to ask questions about daily or monthly ride
+patterns.
+
+### Missingness overview
+Before we calculate additional columns, we can get a quick snapshot of what
+the missingness looks like in the data, and then revisit it once we've
+executed any deletion based on missingness or other problematic values.
+To do this, we can use the wonderful naniar package.
+Note that there is a [known issue](https://github.com/njtierney/naniar/issues/286)
+- also see [here](https://github.com/njtierney/naniar/issues/259) - with naniar
+producing an extra blank plot in the previewed html output, so we should only
+pay attention to the second plot.
+
+
+```{r}
+gg_miss_upset(all_tripdata, nsets=6)
+```
+This captures in a nice visual fashion what we saw above and more:
+station names and ids are always missing together (in the sense of both start or
+end station name and id will be missing, not just name or id).
+Some cases have just starts missing, others ends, some both, and there is a
+set of almost six thousand cases where the end station information will be
+unrecoverable, given that latitude and longitude information is also missing.
+
+
+### Calculated Data And Cleaning
+Now we can add in additional columns based on the datetime columns.
+We don't need to account for year, as this is all 2022 data.
+In addition to drawing on inspiration from the blog mentioned at the top of
+this notebook for generating new columns,
+[this blog post](https://www.linkedin.com/pulse/data-analysis-visualizations-chicago-divvy-bikes-sharing-mazarei/)
+inspired me to also include hours, so we can consider riding habits during
+different parts of the day.
+```{r}
+all_tripdata <- all_tripdata %>%
+  mutate(
+    ride_datetime = as_datetime(started_at),
+    month = month(ride_datetime, label=T),
+    day = day(ride_datetime),
+    day_name = wday(ride_datetime, label=T),
+    hour = hour(ride_datetime)
+  )
+head(all_tripdata)
+```
+
+And let's add ride durations:
+```{r}
+# Note for subsequent work, we should convert the results of difftime, instances
+# of class "difftime" to numeric; specifically we'll use integers as we don't
+# need fractions of seconds, and can then easily check the number of zero
+# length trips
+all_tripdata <- all_tripdata %>%
+  mutate(ride_length = as.integer(difftime(ended_at,started_at), units="secs"))
+head(all_tripdata)
+```
+
+Now let's perform a couple of checks and start doing some cleaning.
+Calling summary on ride_length gives us a place to start.
+```{r}
+summary(all_tripdata %>% select(ride_length))
+```
+Clearly there are negative durations present, which should not be preserved.
+Communication with other data engineers or analysts may be able to resolve where
+these came from and prevent them in the future, but for now we will want to see
+how many such cases are present.
+Moreover, it stands to reason that there are likely also zero length cases, and,
+given that this data has these errors (which are described as having been
+removed on [Divvy's website](https://divvybikes.com/system-data)), then we
+should also check for another issue they address: trips less than 60 seconds
+long.
+
+```{r}
+print(paste("Number of rows with negative ride length:",
+            nrow(all_tripdata %>% filter(ride_length < 0))))
+```
+
+```{r}
+print(paste("Number of rows with empty ride length:",
+            nrow(all_tripdata %>% filter(ride_length == 0))))
+```
+
+```{r}
+print(paste("Number of rows with positive ride length less than 60 seconds:",
+            nrow(all_tripdata %>% filter(ride_length > 0 & ride_length < 60))))
+```
+
+The blog which is of some inspiration to this analysis mentions a separate but
+related issue, where some rides start at station "HQ QR", when the ride was
+in fact an inspection.
+However, the below shows that there are no such cases in the 2022 data
+```{r}
+nrow(all_tripdata %>% filter(start_station_name == "HQ QR"))
+```
+
+Let's delete rows with bad trip durations, creating a new dataframe with the
+result:
+```{r}
+start_count <- nrow(all_tripdata)
+all_tripdata_v2 <- all_tripdata %>%
+  filter(ride_length >= 60)
+print(paste("Removed", start_count - nrow(all_tripdata_v2), "rows"))
+```
+
+```{r}
+print(paste("Number of rows now missing end lat/lon:",
+  nrow(all_tripdata_v2 %>%
+    filter(is.na(end_lat) & is.na(end_lng)))))
+```
+
+Interestingly, this shows us that focusing on duration alone did not address
+the cases with missing end latitude and longitude.
+Let's remove those now:
+```{r}
+start_count <- nrow(all_tripdata_v2)
+all_tripdata_v2 <- all_tripdata_v2 %>%
+  filter(!(is.na(end_lat) & is.na(end_lng)))
+print(paste("Removed", start_count - nrow(all_tripdata_v2), "rows"))
+```
+
+Checking the distribution of rideable_type after these removals shows that
+"docked_bike" does not in fact correspond to an erroneous ride type.
+In fact, this
+[blog](https://www.linkedin.com/pulse/data-analysis-visualizations-chicago-divvy-bikes-sharing-mazarei/)
+suggests "docked_bike" might be an older name for "classic_bike".
+Moreover, the number of these instances is comparatively small, so we will
+leave them as is.
+```{r}
+table(all_tripdata_v2$rideable_type)
+```
+
+
+Finally, let's revisit the missingness overview.
+```{r}
+gg_miss_upset(all_tripdata_v2, nsets=6)
+```
+
+Here we write out the intermediate result after our processing and cleaning.
+```{r}
+write_csv(all_tripdata_v2, "2022-divvy-tripdata-V02.csv")
+```
+
 
 # 4. Analyze
+Again, we can reload the data, if needed.
+```{r}
+defined <- ls()
+if(!("all_tripdata_v2" %in% defined)) {
+  all_tripdata_v2 <- read_csv("2022-divvy-tripdata-V02.csv")
+}
+```
+
+
+TODO
+- Start data changelog
+
+By member/casual:
+- Ride trip length stats (mean/median/min/max)
+- Trips by day
+- Trips by month
+- Trip distance
+- Consider times of day? Added in hour to support this
+
+Plot member/casual proportions by station
 
 # 5. Share
 
