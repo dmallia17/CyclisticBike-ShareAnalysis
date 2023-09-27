@@ -456,9 +456,6 @@ if(!("all_tripdata_v2" %in% defined)) {
 ```
 
 
-TODO
-- Start data changelog
-
 By member/casual:
 - Ride trip length stats (mean/median/min/max)
 - Trips by day
