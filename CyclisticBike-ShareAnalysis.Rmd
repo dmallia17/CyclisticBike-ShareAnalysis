@@ -498,7 +498,7 @@ This is a lot easier to read but the max for casual rides clearly evidences
 a problem of outliers.
 There are 1440 minutes in a day, so the above shows us that the max any member
 "rode" was for a little over a day; for casual riders the max is around
-`r round(max(all_tripdata_v3$ride_length) / (60 * 60 * 24))` days...
+24 days...
 Let's check how many rides overall were for casual members, and then how many of
 those exceeded the maximum member ride duration.
 We can check the number of cases exceeding a day.
@@ -510,7 +510,7 @@ total_casual_exceeding_member_max <- nrow(
 total_casual
 total_casual_exceeding_member_max
 ```
-Out of over 2 million casual rides, only `r total_casual_exceeding_member_max`
+Out of over 2 million casual rides, only 66
 exceeded the member max (a little over a day).
 Thus, for our fourth change, we drop these comparatively few cases that are
 unlikely to tell us much about casual riders, capping duration at 1500 minutes
@@ -565,7 +565,7 @@ violating_case_num <- nrow(all_tripdata_v3 %>%
     start_lat > y_lat_max | end_lat > y_lat_max))
 violating_case_num
 ```
-Thankfully we only have `r violating_case_num` cases, and can discard these
+Thankfully we only have 12 cases, and can discard these
 without much concern.
 ```{r}
 start_count <- nrow(all_tripdata_v3)
@@ -803,7 +803,7 @@ labels <- c(paste0(hrs, "AM"), paste0(hrs, "PM"))
 final_data %>%
   filter(member_casual == "casual") %>%
   mutate(end_hour = hour(ended_at)) %>%
-  ggplot(aes(x=hour, y=end_hour)) +
+  ggplot(aes(x=start_hour, y=end_hour)) +
   geom_count(aes(color=after_stat(prop))) +
   scale_x_continuous(breaks = breaks, labels=labels) +
   scale_y_continuous(breaks = breaks, labels=labels) +
@@ -831,7 +831,7 @@ Cyclistic members.
 final_data %>%
   filter(member_casual == "member") %>%
   mutate(end_hour = hour(ended_at)) %>%
-  ggplot(aes(x=hour, y=end_hour)) +
+  ggplot(aes(x=start_hour, y=end_hour)) +
   geom_count(aes(color=after_stat(prop))) +
   scale_x_continuous(breaks = breaks, labels=labels) +
   scale_y_continuous(breaks = breaks, labels=labels) +
@@ -951,10 +951,135 @@ gives an indication of how this might be challenging to visualize.
 
 
 # 5. Share
+Rather than be repetitive in this notebook, and have summaries in more than
+one location, this section will contain (a) visualizations that would be
+shared with stakeholders and (b) a summary of the key findings from the
+analysis.
+The next section, Act, will contain my top three recommendations based on
+these findings.
 
-Can use polished versions of some of the above visualizations.
+## Visualizations
+In the interest of keeping this work self-contained, we will use a small
+subset of the visualizations we created above, but refined to be clearer for
+sharing with others.
+Given more time, it would be worth exporting this data to Tableau and creating
+more visuals there, particularly for the geographic visualizations which would
+likely be far easier than working in R.
+
+To facilitate just re-running this section, we can load in the data if needed.
+```{r}
+defined <- ls()
+if(!("final_data" %in% defined)) {
+  final_data <- readRDS("2022-divvy-tripdata-V03.RDS")
+}
+```
+
+```{r}
+final_data %>%
+  mutate(rideable_type = replace(
+    rideable_type, rideable_type == "docked_bike", "classic_bike")) %>%
+  ggplot(aes(x=rideable_type)) +
+    geom_bar(aes(fill=member_casual), position="dodge") +
+    scale_x_discrete("Bike Type",
+      labels=c("classic_bike"="Classic", "electric_bike"="Electric")) +
+    scale_fill_discrete("Member Type",
+      labels=c("casual"="Casual", "member"="Member")) +
+    labs(title="Count of Rides by Bike Type",
+         caption="A 'Docked Bike' is counted as a 'Classic Bike'.",
+         x="Bike Type", y="Count", fill="Member Type")
+```
+
+
+```{r}
+ggplot(final_data, aes(x=start_day_name)) +
+  geom_bar(aes(fill=member_casual), position="dodge") +
+  scale_fill_discrete("Member Type",
+                      labels=c("casual"="Casual", "member"="Member")) +
+  labs(title="Count of Rides by Day",
+       x="Day", y="Count", fill="Member Type")
+```
+
+```{r}
+ggplot(final_data, aes(x=start_month)) +
+  geom_bar(aes(fill=member_casual), position="dodge") +
+  scale_fill_discrete("Member Type",
+    labels=c("casual"="Casual", "member"="Member")) +
+  labs(title="Count of Rides by Month",
+      x="Month", y="Count", fill="Member Type")
+```
+
+
+```{r}
+# Some setup for nice axis labels
+breaks <- seq(0,23,3) # Breaks to display on the axis
+hrs <- c(12,3,6,9)
+# Create 12hr clock labels
+labels <- c(paste0(hrs, "AM"), paste0(hrs, "PM"))
+final_data %>%
+  filter(member_casual == "casual") %>%
+  mutate(end_hour = hour(ended_at)) %>%
+  ggplot(aes(x=start_hour, y=end_hour)) +
+  geom_count(aes(color=after_stat(prop))) +
+  scale_x_continuous(breaks = breaks, labels=labels) +
+  scale_y_continuous(breaks = breaks, labels=labels) +
+  scale_color_gradient(low="red", high="green") +
+  labs(title="Start and End Times for Casual Rides",
+       subtitle="Dots give pair occurrences, with frequency and proportion shown by size and color",
+       caption="The y=x concentration shows short ride duration, while points
+       above y=x give multi-hour rides and points below, show trips beyond midnight.",
+       x="Start hour", y="End Hour", size="Count", color="Proportion")
+```
+
+```{r}
+final_data %>%
+  filter(member_casual == "member") %>%
+  mutate(end_hour = hour(ended_at)) %>%
+  ggplot(aes(x=start_hour, y=end_hour)) +
+  geom_count(aes(color=after_stat(prop))) +
+  scale_x_continuous(breaks = breaks, labels=labels) +
+  scale_y_continuous(breaks = breaks, labels=labels) +
+  scale_color_gradient(low="red", high="green") +
+  labs(title="Start and End Times for Member Rides",
+       subtitle="Dots give pair occurrences, with frequency and proportion shown by size and color",
+       caption="The y=x concentration shows short ride duration, while points
+       above y=x give multi-hour rides and points below, show trips beyond midnight.",
+       x="Start hour", y="End Hour", size="Count", color="Proportion")
+```
+
+## Summary
+Without being reductive, it does not seem to be unfair to say that the two
+groups under consideration, Cyclistic members and "casual" riders (who have a
+single ride or day pass), live up to their designations.
+
+- Expected seasonal and hourly patterns exist across both groups, as less people
+will be interested in riding a bike in the cold, wet weather months, or during
+nighttime hours.
+- Nevertheless, members reflect as more consistent users both in terms of usage
+by day in the week and by month. They appear more likely to use bikes across the
+year or across the week, whereas casual rides display much more peaked
+distributions. For usage by day, casual rides have something of an inverted
+distribution to that of members, using bikes primarily on weekends. For months,
+their usage strongly peaks in summer.
+- Considering usage by hours, casual riders are much more likely to use bikes
+at any time of the day, but there is a commonality across distributions for
+both groups in that the majority of rides are of short duration, and both
+actually have considerable concentration during times many people commute home
+from work.
+- In addition, there seems to be a preference among casual riders for
+electric bikes over classic bikes, whereas for members this is the reverse.
+
+The above said, consideration of the overlap between distributions - e.g.
+observing the common usage around times typically used for commuting from work
+as well as the fact that casual use does not drop to zero on weekdays or during
+the coldest months - suggests that there may indeed be a group of riders among
+casual riders, who might consider becoming members.
 
 # 6. Act
+
+Todo:
+- Recommendations
+- Put Github profile link
+- Put on Github profile
 
 - Need more information about the rider types and information from the
 riders themselves:
@@ -965,3 +1090,12 @@ riders themselves:
   access to their preferred bike type
 - Need a financial breakdown
 
+# 7. Future Work
+Few projects are ever really complete, and this one is no exception.
+Limited in time by my work schedule, I tried to do a thorough analysis in R,
+but would like to continue this work at some point in the following ways:
+
+- Creating additional visualizations in Tableau
+- Making an alternate version of this notebook which uses primarily SQL, except
+where we would like to visualize something. As an example using Postgres, this
+can be done with the DBI and RPostgres packages.
