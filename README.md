@@ -19,3 +19,8 @@ work.
 stored in this repository, but can easily be recreated using the R Notebook.
 - ```DataChangelog.md``` contains a more detailed description of what changed
 between data files.
+
+The below is an example of just one of the fun plots I created for my analysis and
+visualization, considering how casual riders use bikes by start and end hours
+of their rides:
+![CasualStartEnd](images/CasualStartAndEndTimes.png)
