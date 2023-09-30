@@ -10,6 +10,11 @@ library(tidyverse)
 library(skimr)
 library(naniar)
 
+# Including this line to disable a "friendly" but unhelpful warning we get
+# when grouping by multiple columns
+# https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
+options(dplyr.summarise.inform=F)
+
 # Set this to false if you want to download everything for the first time
 DOWNLOADED <- TRUE
 ```
@@ -445,27 +450,303 @@ Here we write out the intermediate result after our processing and cleaning.
 write_csv(all_tripdata_v2, "2022-divvy-tripdata-V02.csv")
 ```
 
+In addition, for resuming our work in this notebook it is best to save out the
+data as an RDS object.
+Otherwise, if we try to reload the data only from csv, we will need to do
+extra work to convert day_name and month back into ordered form, as they will
+be interpreted as just characters.
+```{r}
+saveRDS(all_tripdata_v2, "2022-divvy-tripdata-V02.RDS")
+```
+
+
 
 # 4. Analyze
 Again, we can reload the data, if needed.
 ```{r}
 defined <- ls()
 if(!("all_tripdata_v2" %in% defined)) {
-  all_tripdata_v2 <- read_csv("2022-divvy-tripdata-V02.csv")
+  all_tripdata_v2 <- readRDS("2022-divvy-tripdata-V02.RDS")
 }
 ```
 
+## Member types
+Now that we have our cleaned data, let's first look at the numbers and
+proportions of rides by rider types:
+```{r}
+table(all_tripdata_v2$member_casual)
+prop.table(table(all_tripdata_v2$member_casual))
+```
+Thankfully the deletions executed in the cleaning phase have not fundamentally
+altered the proportions of rides.
+
+## Ride Durations
+As a first step, we can consider the minimum, maximum, mean and median ride
+lengths.
+Let's look at this overall...
+```{r}
+summary(all_tripdata_v2$ride_length)
+```
+
+...and now broken down by casual riders vs. members.
+```{r}
+all_tripdata_v2 %>%
+  group_by(member_casual) %>%
+  summarize(min=min(ride_length), max=max(ride_length), mean=mean(ride_length),
+            median=median(ride_length))
+```
+The fact that the mean is significantly greater than the median overall
+and for both groups suggests there is considerable rightward skew, with the
+mean being inflated by outlier long rides. Considering seconds alone
+is difficult, so let's view this by minutes.
+
+```{r}
+all_tripdata_v2 <- all_tripdata_v2 %>%
+  mutate(ride_length_mins=(ride_length / 60.0))
+all_tripdata_v2 %>%
+  group_by(member_casual) %>%
+  summarize(min=min(ride_length_mins), max=max(ride_length_mins),
+            mean=mean(ride_length_mins), median=median(ride_length_mins))
+```
+There are 1440 minutes in a day, so the above shows us that the max any member
+"rode" was for a little over a day; for casual riders the max is over 20 days...
+Let's check how many rides overall were for casual members, and then how many of
+those exceeded a day.
+
+```{r}
+total_casual <- nrow(all_tripdata_v2 %>% filter(member_casual == "casual"))
+total_casual_exceeding_day <- nrow(
+  all_tripdata_v2 %>%
+    filter(member_casual == "casual" & ride_length_mins > 1440))
+total_casual
+total_casual_exceeding_day
+```
+
+Out of over 2 million casual rides, only `r total_casual_exceeding_day`
+exceeded a day; these few cases are unlikely to tell us much about casual
+riders, so let's exclude the cases that exceed the member max, and reconsider
+the statistics.
+
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500) %>%
+  group_by(member_casual) %>%
+  summarize(min=min(ride_length_mins), max=max(ride_length_mins),
+            mean=mean(ride_length_mins), median=median(ride_length_mins))
+```
+
+Inspecting this visually is tricky given not only the outliers, but the very
+broad range of values. One option is to constrain the range further to get a
+better sense of distributions.
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 120) %>%
+  ggplot(aes(x=ride_length_mins)) + geom_density(aes(fill=member_casual), alpha=0.5)
+```
+This plot does confirm that the distribution for members has a sharper peak
+covering the range of several minute rides, whereas casual riders clearly skew
+towards longer rides.
+We can hypothesize that this may reflect ride motivations: members may be
+primarily using rides for short trips to and from work, or social gatherings,
+whereas more casual riders may be using bikes for longer outings (an end in
+themselves).
+
+## Day Behavior
+A quick starting place for understanding behavior by day is to examine the
+frequency of rides by day, broken into casual and member rides. NOTE: this plot
+and others like it below require careful interpretation, given that the
+distribution of member rides to casual rides is not 50/50, but in fact closer to
+60/40. That said, we can still get a feeling for the different distributions
+side by side.
+```{r}
+ggplot(all_tripdata_v2, aes(x=day_name)) +
+  geom_bar(aes(fill=member_casual), position="dodge")
+```
+The above gives us some indication that more casual rides occur on weekends
+than weekdays; members rides are somewhat more evenly distributed but do
+emphasize weekday use.
+Again, this does suggest difference of reasons for usage.
+
+Let's look at the fine-toothed breakdown of statistics by day.
+It turns out that the minimum allowed (1 minute) occurs every day of the week,
+and values close to the max (again we limit our analysis to the max member ride
+length), so let's just retrieve mean and median.
+We group by day_name first so as to compare values day by day.
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500) %>%
+  group_by(day_name, member_casual) %>%
+  summarize(mean(ride_length_mins), median(ride_length_mins))
+```
+We can also examine this visually (let's just examine median):
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500) %>%
+  group_by(day_name, member_casual) %>%
+  summarize(median=median(ride_length_mins)) %>%
+  ggplot(aes(x=day_name, y=median)) +
+  geom_col(aes(fill=member_casual), position="dodge")
+```
+
+Overall, the actual per-ride statistics conform to the picture given by
+ride counts per day (as well as the raw ride statistics we examined before),
+where overall casual users go for longer rides and members and casual riders
+differ on how they behave by day.
+Member ride statistics don't vary as much day by day (though durations do
+increase a little on weekends, perhaps when rides can be more leisurely),
+whereas casual rides do shorten by multiple minutes (e.g. consider Sunday casual
+median of ~15 minutes vs. Tuesday casual median of ~12 minutes).
+Geographic and distance traveled information may help provide more information
+on what is happening in the casual group, **but** this does suggest
+that there may be multiple groups within casual riders:
+
+- a (perhaps small) group that are more likely to ride on any day of the week
+and who are responsible for the shorter, consistent behaviors on weekdays;
+
+- and a likely larger group who primarily ride for leisure on weekends.
+The first group would be the ideal targets of a campaign for converting
+casual riders to members!
+
+## Monthly/Seasonal Behavior
+Again, for monthly behavior as for daily behavior, we can by visualizing the
+counts of rides by month (heeding the aforementioned warning about the
+proportions of casual rides to member rides).
+```{r}
+ggplot(all_tripdata_v2, aes(x=month)) +
+  geom_bar(aes(fill=member_casual), position="dodge")
+```
+Unsurprisingly, the months of December, January and February are noticeably
+less popular for members and casual riders, as these are winter months in
+North America, and many will seek other options for transportation in the face
+of low temperatures, snow and ice.
+Warmer and safer weather months certainly see a lot more bike usage, seeing
+increases by a factor of 4+.
+Yet, members again seem to evidence more consistency (as with their ride
+durations and use across the week), having a less peaked distribution and in
+fact the months with maximum use for are later than for casual riders.
+
+Let's consider statistics by month:
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500) %>%
+  group_by(month, member_casual) %>%
+  summarize(mean=mean(ride_length_mins), median=median(ride_length_mins))
+```
+Again, we can also visualize this (for the median):
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500) %>%
+  group_by(month, member_casual) %>%
+  summarize(median=median(ride_length_mins)) %>%
+  ggplot(aes(x=month, y=median)) +
+  geom_col(aes(fill=member_casual), position="dodge")
+```
+As with ridership by day, it seems there are two groups of riders among casual
+rides, and this is worth mining further.
+
+## Hourly Behavior
+Days were an intuitive starting place, and months give us a higher level
+overview, but we can also zoom in further to consider hours of usage.
+It is an interesting avenue to mine, but is somewhat difficult to review and
+plot, given that we want to consider counts by start and end hour pairs, and
+our analysis should be flexible enough to consider where rides may exceed the
+boundary of an hour.
+
+One way to examine hours of usage is to make a plot counting the frequency for
+each combination of a ride start hour and end hour.
+We can easily create this 24x24 grid using ggplot's geom_count and this
+has the advantage over a heatmap approach in that we can make use of both size
+and color here: in the below we will use size to indicates raw count, and color
+to capture proportion.
+We make separate plots for casual rides and member rides, as otherwise the
+plots will become too small to interpret.
+```{r}
+# Some setup for nice axis labels
+breaks <- seq(0,23,3) # Breaks to display on the axis
+hrs <- c(12,3,6,9)
+# Create 12hr clock labels
+labels <- c(paste0(hrs, "AM"), paste0(hrs, "PM"))
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500 & member_casual == "casual") %>%
+  mutate(end_hour = hour(ended_at)) %>%
+  ggplot(aes(x=hour, y=end_hour)) +
+  geom_count(aes(color=after_stat(prop))) +
+  scale_x_continuous(breaks = breaks, labels=labels) +
+  scale_y_continuous(breaks = breaks, labels=labels) +
+  labs(title="Counts for Casual Rides")
+```
+The above does require some careful reading and interpretation.
+Moreover, it is complicated by the fact that you can have rides that last for
+multiple hours before midnight (all values above the y=x line) or even rides
+which carry over into the subsequent day (all values below the y=x line).
+Nevertheless, the plot gives a fascinating window into hourly trends:
+
+1. First, the fact that the majority of rides are concentrated around the y=x
+line, or a little above the line, confirms that the majority of rides are short.
+The ride begins in the hour and ends in the same hour or perhaps the next.
+2. Unsurprisingly, many rides occur in the daylight hours, but there are also
+clearly plenty of night owls among casual riders, with bikes being taken out and
+returned at all times of the day.
+3. There is something of a peak in usage around 5PM, which is somewhat
+unexpected given that these are casual riders. Again, this suggests that there
+is likely a group among them that do use these bikes somewhat regularly,
+perhaps for commuting home, and that would constitute possible converts to
+Cyclistic members.
+
+```{r}
+all_tripdata_v2 %>%
+  filter(ride_length_mins <= 1500 & member_casual == "member") %>%
+  mutate(end_hour = hour(ended_at)) %>%
+  ggplot(aes(x=hour, y=end_hour)) +
+  geom_count(aes(color=after_stat(prop))) +
+  scale_x_continuous(breaks = breaks, labels=labels) +
+  scale_y_continuous(breaks = breaks, labels=labels) +
+  labs(title="Counts for Member Rides")
+```
+The story for members has some clear differences (though as with many such
+plots, we need to heed the difference in ride counts between members and
+casual riders).
+
+1. The areas far above and below the y=x line are much more sparse, while the
+y=x line (and a little above) itself remains a strong concentration.
+This suggests more consistent, regular usage with less instances of bikes being
+out for many hours or even into the next day.
+2. We see an even stronger concentration around 5PM for members than was
+present for casual rides, as well as a considerable number in the morning,
+around 8AM.
+This would be consistent with use for rides to or from work.
+
+## Geographic Behavior
+
+```{r}
+
+```
+
+
+## Distance Behavior
+
 
 By member/casual:
-- Ride trip length stats (mean/median/min/max)
-- Trips by day
-- Trips by month
-- Trip distance
+- Ride trip length stats (mean/median/min/max)...DONE
+- Trips by day - count, and trip stats (mean/median/min/max)...DONE
+- Trips by month - count, and trip stats (mean/median/min/max)...DONE
+- Trip distance - use manhattan distance (would need to add additional column)
 - Consider times of day? Added in hour to support this
 
 Plot member/casual proportions by station
 
+ADD IN START AND END HOUR, REMOVE DAY
+DELETE ROWS WITH INCORRECT lat/long
+
 # 5. Share
 
+Can use polished versions of some of the above visualizations.
+
 # 6. Act
+
+- Need more information about the rider types and information from the
+riders themselves:
+  - How many of the casual riders are single ride vs daily pass?
+  - What is their primary reason for using the bike?
+- Need a financial breakdown
 
