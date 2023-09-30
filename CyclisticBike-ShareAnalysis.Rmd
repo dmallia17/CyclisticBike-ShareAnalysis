@@ -465,8 +465,8 @@ saveRDS(all_tripdata_v2, "2022-divvy-tripdata-V02.RDS")
 Again, we can reload the data, if needed.
 ```{r}
 defined <- ls()
-if(!("all_tripdata_v2" %in% defined)) {
-  all_tripdata_v2 <- readRDS("2022-divvy-tripdata-V02.RDS")
+if(!("final_data" %in% defined)) {
+  final_data <- readRDS("2022-divvy-tripdata-V02.RDS")
 }
 ```
 
@@ -474,8 +474,8 @@ if(!("all_tripdata_v2" %in% defined)) {
 Now that we have our cleaned data, let's first look at the numbers and
 proportions of rides by rider types:
 ```{r}
-table(all_tripdata_v2$member_casual)
-prop.table(table(all_tripdata_v2$member_casual))
+table(final_data$member_casual)
+prop.table(table(final_data$member_casual))
 ```
 Thankfully the deletions executed in the cleaning phase have not fundamentally
 altered the proportions of rides.
@@ -485,12 +485,12 @@ As a first step, we can consider the minimum, maximum, mean and median ride
 lengths.
 Let's look at this overall...
 ```{r}
-summary(all_tripdata_v2$ride_length)
+summary(final_data$ride_length)
 ```
 
 ...and now broken down by casual riders vs. members.
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   group_by(member_casual) %>%
   summarize(min=min(ride_length), max=max(ride_length), mean=mean(ride_length),
             median=median(ride_length))
@@ -501,9 +501,9 @@ mean being inflated by outlier long rides. Considering seconds alone
 is difficult, so let's view this by minutes.
 
 ```{r}
-all_tripdata_v2 <- all_tripdata_v2 %>%
+final_data <- final_data %>%
   mutate(ride_length_mins=(ride_length / 60.0))
-all_tripdata_v2 %>%
+final_data %>%
   group_by(member_casual) %>%
   summarize(min=min(ride_length_mins), max=max(ride_length_mins),
             mean=mean(ride_length_mins), median=median(ride_length_mins))
@@ -514,9 +514,9 @@ Let's check how many rides overall were for casual members, and then how many of
 those exceeded a day.
 
 ```{r}
-total_casual <- nrow(all_tripdata_v2 %>% filter(member_casual == "casual"))
+total_casual <- nrow(final_data %>% filter(member_casual == "casual"))
 total_casual_exceeding_day <- nrow(
-  all_tripdata_v2 %>%
+  final_data %>%
     filter(member_casual == "casual" & ride_length_mins > 1440))
 total_casual
 total_casual_exceeding_day
@@ -528,7 +528,7 @@ riders, so let's exclude the cases that exceed the member max, and reconsider
 the statistics.
 
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500) %>%
   group_by(member_casual) %>%
   summarize(min=min(ride_length_mins), max=max(ride_length_mins),
@@ -539,7 +539,7 @@ Inspecting this visually is tricky given not only the outliers, but the very
 broad range of values. One option is to constrain the range further to get a
 better sense of distributions.
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 120) %>%
   ggplot(aes(x=ride_length_mins)) + geom_density(aes(fill=member_casual), alpha=0.5)
 ```
@@ -559,7 +559,7 @@ distribution of member rides to casual rides is not 50/50, but in fact closer to
 60/40. That said, we can still get a feeling for the different distributions
 side by side.
 ```{r}
-ggplot(all_tripdata_v2, aes(x=day_name)) +
+ggplot(final_data, aes(x=day_name)) +
   geom_bar(aes(fill=member_casual), position="dodge")
 ```
 The above gives us some indication that more casual rides occur on weekends
@@ -573,14 +573,14 @@ and values close to the max (again we limit our analysis to the max member ride
 length), so let's just retrieve mean and median.
 We group by day_name first so as to compare values day by day.
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500) %>%
   group_by(day_name, member_casual) %>%
   summarize(mean(ride_length_mins), median(ride_length_mins))
 ```
 We can also examine this visually (let's just examine median):
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500) %>%
   group_by(day_name, member_casual) %>%
   summarize(median=median(ride_length_mins)) %>%
@@ -612,7 +612,7 @@ Again, for monthly behavior as for daily behavior, we can by visualizing the
 counts of rides by month (heeding the aforementioned warning about the
 proportions of casual rides to member rides).
 ```{r}
-ggplot(all_tripdata_v2, aes(x=month)) +
+ggplot(final_data, aes(x=month)) +
   geom_bar(aes(fill=member_casual), position="dodge")
 ```
 Unsurprisingly, the months of December, January and February are noticeably
@@ -627,14 +627,14 @@ fact the months with maximum use for are later than for casual riders.
 
 Let's consider statistics by month:
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500) %>%
   group_by(month, member_casual) %>%
   summarize(mean=mean(ride_length_mins), median=median(ride_length_mins))
 ```
 Again, we can also visualize this (for the median):
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500) %>%
   group_by(month, member_casual) %>%
   summarize(median=median(ride_length_mins)) %>%
@@ -666,7 +666,7 @@ breaks <- seq(0,23,3) # Breaks to display on the axis
 hrs <- c(12,3,6,9)
 # Create 12hr clock labels
 labels <- c(paste0(hrs, "AM"), paste0(hrs, "PM"))
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500 & member_casual == "casual") %>%
   mutate(end_hour = hour(ended_at)) %>%
   ggplot(aes(x=hour, y=end_hour)) +
@@ -694,7 +694,7 @@ perhaps for commuting home, and that would constitute possible converts to
 Cyclistic members.
 
 ```{r}
-all_tripdata_v2 %>%
+final_data %>%
   filter(ride_length_mins <= 1500 & member_casual == "member") %>%
   mutate(end_hour = hour(ended_at)) %>%
   ggplot(aes(x=hour, y=end_hour)) +
