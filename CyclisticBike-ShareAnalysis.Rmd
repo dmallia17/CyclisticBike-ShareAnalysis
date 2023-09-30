@@ -630,7 +630,7 @@ saveRDS(all_tripdata_v3, "2022-divvy-tripdata-V03.RDS")
 
 # 4. Analyze
 Again, we can reload the data, if needed.
-```{r}
+```{r, warning=FALSE}
 defined <- ls()
 if(!("final_data" %in% defined)) {
   final_data <- readRDS("2022-divvy-tripdata-V03.RDS")
@@ -848,14 +848,43 @@ around 8AM.
 This would be consistent with use for rides to or from work.
 
 ## Bike Type Usage
-We can examine which types of bikes
+We should also examine which types of bikes casual riders are using compared
+to members.
 ```{r}
-
+ggplot(final_data, aes(x=rideable_type)) +
+  geom_bar(aes(fill=member_casual), position="dodge")
 ```
+This quick glance (a) requires care again because of the different numbers of
+casual rides vs member rides and (b) is muddled by the presence of the docked
+bike type; let's try this again counting docked_bike as a classic_bike (per the
+[blog](https://www.linkedin.com/pulse/data-analysis-visualizations-chicago-divvy-bikes-sharing-mazarei/)
+mentioned in processing.
+```{r}
+final_data %>%
+  mutate(rideable_type = replace(
+    rideable_type, rideable_type == "docked_bike", "classic_bike")) %>%
+  ggplot(aes(x=rideable_type)) +
+    geom_bar(aes(fill=member_casual), position="dodge")
+```
+Assuming this combining is correct, we can observe what seems to be a preference
+among casual riders for electric bikes.
+Members, on the other hand, actually lean towards the classic bikes.
+That said, the lack of an extreme imbalance suggests no obvious obstacle, at
+least as far as these preferences go, to some casual riders becoming members.
 
 ## Distance Behavior
 
 ## Geographic Behavior
+Initially I intended to make use of the longitude and latitude data to consider
+differences between users by geography, mapping out proportions of casual
+rides to member rides at different stations.
+However, due to a lack of time and knowing that even if creating the initial
+graph might not be very complex, refining it for interpretation or any sharing
+would likely be very difficult given great density as you zoom out and only
+a limited review as you zoom in.
+For context,
+[Divvy's map](https://account.divvybikes.com/map)
+gives an indication of how this might be challenging to visualize.
 
 
 # 5. Share
@@ -868,5 +897,8 @@ Can use polished versions of some of the above visualizations.
 riders themselves:
   - How many of the casual riders are single ride vs daily pass?
   - What is their primary reason for using the bike?
+  - Have they considered becoming a member and if so, why have they not done
+  so already? Would want to know if it is an issue such as a lack of reliable
+  access to their preferred bike type
 - Need a financial breakdown
 
