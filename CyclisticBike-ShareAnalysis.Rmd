@@ -9,6 +9,7 @@ output: html_notebook
 library(tidyverse)
 library(skimr)
 library(naniar)
+library(geosphere)
 
 # Including this line to disable a "friendly" but unhelpful warning we get
 # when grouping by multiple columns
@@ -459,14 +460,180 @@ be interpreted as just characters.
 saveRDS(all_tripdata_v2, "2022-divvy-tripdata-V02.RDS")
 ```
 
+## Additional Cleaning and Calculations - 9/29/2023
+Work on the analysis phase naturally reveals additional problems missed during
+initial processing, as well as additional needs.
+To improve on the initial processing, let's do the following, beginning with
+reading in the data.
+```{r}
+all_tripdata_v3 <- readRDS("2022-divvy-tripdata-V02.RDS")
+```
 
+First, the number of the day in the month was initially included for considering
+trends evolving over the course of a month, but this is unlikely to yield
+any significant patterns, so we can drop day for now.
+Second, analyzing trends by hour requires using both start and end hours, so
+let's rename hour to the more accurate indicator of start_hour and also
+include an end hour.
+In a similar vein, ride_datetime was an extraneous column as started_at and
+ended_at were already interpreted as datetimes, and we should also rename our
+day_name and month columns to indicate that these are for the start of the ride.
+Third, initially we left ride duration in seconds, but consider the following.
+```{r}
+summary(all_tripdata_v3$ride_length)
+```
+Examining these numbers requires a lot of mental arithmetic.
+Now, in minutes, broken down by rider type:
+```{r}
+all_tripdata_v3 %>%
+  mutate(ride_length=ride_length/60) %>%
+  group_by(member_casual) %>%
+  summarize(min=min(ride_length), max=max(ride_length), mean=mean(ride_length),
+            median=median(ride_length))
+```
+This is a lot easier to read but the max for casual rides clearly evidences
+a problem of outliers.
+There are 1440 minutes in a day, so the above shows us that the max any member
+"rode" was for a little over a day; for casual riders the max is around
+`r round(max(all_tripdata_v3$ride_length) / (60 * 60 * 24))` days...
+Let's check how many rides overall were for casual members, and then how many of
+those exceeded the maximum member ride duration.
+We can check the number of cases exceeding a day.
+```{r}
+total_casual <- nrow(all_tripdata_v3 %>% filter(member_casual == "casual"))
+total_casual_exceeding_member_max <- nrow(
+  all_tripdata_v3 %>%
+    filter(member_casual == "casual" & (ride_length / 60.0) > 1500))
+total_casual
+total_casual_exceeding_member_max
+```
+Out of over 2 million casual rides, only `r total_casual_exceeding_member_max`
+exceeded the member max (a little over a day).
+Thus, for our fourth change, we drop these comparatively few cases that are
+unlikely to tell us much about casual riders, capping duration at 1500 minutes
+(a little over the observed maximum member ride duration).
+
+The below accomplishes these 4 changes in what is basically a one-liner.
+dyplr is pretty neat!
+```{r}
+start_count <- nrow(all_tripdata_v3)
+all_tripdata_v3 <- all_tripdata_v3 %>%
+  select(-c(day, ride_datetime)) %>%
+  rename(start_hour=hour, start_day_name=day_name, start_month=month) %>%
+  mutate(end_hour = hour(ended_at),
+         ride_len_mins = ride_length / 60.0) %>%
+  select(-ride_length) %>%
+  filter(ride_len_mins <= 1500)
+print(paste("Removed", start_count - nrow(all_tripdata_v3), "rows"))
+head(all_tripdata_v3)
+```
+
+An additional change needed for considering longitude and latitude data is
+removing erroneous values in these columns.
+Previously we discarded cases with missing values, but a closer look back at the
+ranges of values these take on reveals problems even where we "have" values:
+```{r}
+all_tripdata_v3 %>%
+  select(start_lat,end_lat,start_lng, end_lng) %>%
+  skim_without_charts()
+```
+We have a zero as the the minimum end latitude and as the maximum end longitude
+(per the maps::map() documentation, longitudes to the west of Greenwich are
+negative); the maximum start latitude is a line north of Illinois and the
+maximum start longitude is east of Illinois.
+Without more precise knowledge of the specific extent of Divvy's network other
+than the map provided
+[here](https://account.divvybikes.com/map), let's check how many cases violate
+the boundaries of Illinois, referring to the bounding box information
+[here](https://anthonylouisdagostino.com/bounding-boxes-for-all-us-states/):
+```{r}
+y_lat_min <- 36.970298
+y_lat_max <- 42.508481
+x_lng_min <- -91.513079
+x_lng_max <- -87.494756
+```
+
+
+```{r}
+violating_case_num <- nrow(all_tripdata_v3 %>%
+  filter(start_lng < x_lng_min | end_lng < x_lng_min |
+    start_lng > x_lng_max | end_lng > x_lng_max |
+    start_lat < y_lat_min | end_lat < y_lat_min |
+    start_lat > y_lat_max | end_lat > y_lat_max))
+violating_case_num
+```
+Thankfully we only have `r violating_case_num` cases, and can discard these
+without much concern.
+```{r}
+start_count <- nrow(all_tripdata_v3)
+all_tripdata_v3 <- all_tripdata_v3 %>%
+    filter(!(start_lng < x_lng_min | end_lng < x_lng_min |
+    start_lng > x_lng_max | end_lng > x_lng_max |
+    start_lat < y_lat_min | end_lat < y_lat_min |
+    start_lat > y_lat_max | end_lat > y_lat_max))
+print(paste("Removed", start_count - nrow(all_tripdata_v3), "rows"))
+```
+
+With these columns in better shape, we can now create a column for distance
+based on calculations with the start and end coordinates.
+To do this we can use the geosphere package's distGeo for an accurate distance
+calculation between starting and ending longitude, latitude pairs; results are
+given in meters.
+These distances will be somewhat unreliable for a couple of reasons:
+
+- Users may not take the most optimal route
+- "Straight line" distance will be inappropriate given city blocks and obstacles
+like buildings
+- A ride may start and end at the same station, so the distance will appear to
+be 0
+
+Getting these calculations to work were very tricky, as this a row-wise
+calculation, where 2 groups of 2 columns each need to be formed, so
+accomplishing it proved very difficult.
+I am leaving some prior attempts which either exhausted memory or took too long
+until I found this very helpful
+[stack overflow thread](https://stackoverflow.com/questions/72950041/calculating-distance-with-geospheredistgeo-within-dyplrmutate)
+which seems to have started in a similar place and the author found a solution
+which had not occurred to me but reduced processing time from endless minutes
+to only a few seconds.
+```{r}
+# EXHAUSTS MEMORY
+# all_tripdata_v3$ride_dist_meters <- distm(
+#   cbind(all_tripdata_v3$start_lng, all_tripdata_v3$start_lat),
+#   cbind(all_tripdata_v3$end_lng, all_tripdata_v3$end_lat)
+# )[1,]
+
+# Runs "indefinitely"
+# all_tripdata_v3 <- all_tripdata_v3 %>%
+#   rowwise() %>%
+#   mutate(ride_dist_meters = distGeo(
+#     c_across(c(start_lng, start_lat)), c_across(c(end_lng, end_lat))))
+
+# Encounters a vector length error; postscript - this is because this would
+# quite literally concatenate the 2 columns end after end for 1 very long
+# vector!
+# all_tripdata_v3 <- all_tripdata_v3 %>%
+#   mutate(ride_dist_meters=distGeo(
+#     c(start_lng, start_lat), c(end_lng, end_lat)))
+
+all_tripdata_v3 <- all_tripdata_v3 %>%
+  mutate(ride_dist_meters = distGeo(
+    cbind(start_lng, start_lat), cbind(end_lng, end_lat)
+  ))
+```
+
+Now we can write out this refined dataset.
+```{r}
+write_csv(all_tripdata_v3, "2022-divvy-tripdata-V03.csv")
+saveRDS(all_tripdata_v3, "2022-divvy-tripdata-V03.RDS")
+```
 
 # 4. Analyze
 Again, we can reload the data, if needed.
 ```{r}
 defined <- ls()
 if(!("final_data" %in% defined)) {
-  final_data <- readRDS("2022-divvy-tripdata-V02.RDS")
+  final_data <- readRDS("2022-divvy-tripdata-V03.RDS")
 }
 ```
 
@@ -485,63 +652,28 @@ As a first step, we can consider the minimum, maximum, mean and median ride
 lengths.
 Let's look at this overall...
 ```{r}
-summary(final_data$ride_length)
+summary(final_data$ride_len_mins)
 ```
 
 ...and now broken down by casual riders vs. members.
 ```{r}
 final_data %>%
   group_by(member_casual) %>%
-  summarize(min=min(ride_length), max=max(ride_length), mean=mean(ride_length),
-            median=median(ride_length))
+  summarize(min=min(ride_len_mins), max=max(ride_len_mins), mean=mean(ride_len_mins),
+            median=median(ride_len_mins))
 ```
 The fact that the mean is significantly greater than the median overall
 and for both groups suggests there is considerable rightward skew, with the
-mean being inflated by outlier long rides. Considering seconds alone
-is difficult, so let's view this by minutes.
+mean being inflated by outlier long rides.
 
-```{r}
-final_data <- final_data %>%
-  mutate(ride_length_mins=(ride_length / 60.0))
-final_data %>%
-  group_by(member_casual) %>%
-  summarize(min=min(ride_length_mins), max=max(ride_length_mins),
-            mean=mean(ride_length_mins), median=median(ride_length_mins))
-```
-There are 1440 minutes in a day, so the above shows us that the max any member
-"rode" was for a little over a day; for casual riders the max is over 20 days...
-Let's check how many rides overall were for casual members, and then how many of
-those exceeded a day.
-
-```{r}
-total_casual <- nrow(final_data %>% filter(member_casual == "casual"))
-total_casual_exceeding_day <- nrow(
-  final_data %>%
-    filter(member_casual == "casual" & ride_length_mins > 1440))
-total_casual
-total_casual_exceeding_day
-```
-
-Out of over 2 million casual rides, only `r total_casual_exceeding_day`
-exceeded a day; these few cases are unlikely to tell us much about casual
-riders, so let's exclude the cases that exceed the member max, and reconsider
-the statistics.
-
+Inspecting this visually is tricky even accounting for major outliers in
+cleaning, given the very broad range of values.
+One option is to constrain the range further to get a better sense of
+distributions.
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500) %>%
-  group_by(member_casual) %>%
-  summarize(min=min(ride_length_mins), max=max(ride_length_mins),
-            mean=mean(ride_length_mins), median=median(ride_length_mins))
-```
-
-Inspecting this visually is tricky given not only the outliers, but the very
-broad range of values. One option is to constrain the range further to get a
-better sense of distributions.
-```{r}
-final_data %>%
-  filter(ride_length_mins <= 120) %>%
-  ggplot(aes(x=ride_length_mins)) + geom_density(aes(fill=member_casual), alpha=0.5)
+  filter(ride_len_mins <= 120) %>%
+  ggplot(aes(x=ride_len_mins)) + geom_density(aes(fill=member_casual), alpha=0.5)
 ```
 This plot does confirm that the distribution for members has a sharper peak
 covering the range of several minute rides, whereas casual riders clearly skew
@@ -551,7 +683,7 @@ primarily using rides for short trips to and from work, or social gatherings,
 whereas more casual riders may be using bikes for longer outings (an end in
 themselves).
 
-## Day Behavior
+## Day of the Week Behavior
 A quick starting place for understanding behavior by day is to examine the
 frequency of rides by day, broken into casual and member rides. NOTE: this plot
 and others like it below require careful interpretation, given that the
@@ -559,7 +691,7 @@ distribution of member rides to casual rides is not 50/50, but in fact closer to
 60/40. That said, we can still get a feeling for the different distributions
 side by side.
 ```{r}
-ggplot(final_data, aes(x=day_name)) +
+ggplot(final_data, aes(x=start_day_name)) +
   geom_bar(aes(fill=member_casual), position="dodge")
 ```
 The above gives us some indication that more casual rides occur on weekends
@@ -571,20 +703,18 @@ Let's look at the fine-toothed breakdown of statistics by day.
 It turns out that the minimum allowed (1 minute) occurs every day of the week,
 and values close to the max (again we limit our analysis to the max member ride
 length), so let's just retrieve mean and median.
-We group by day_name first so as to compare values day by day.
+We group by start_day_name first so as to compare values day by day.
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500) %>%
-  group_by(day_name, member_casual) %>%
-  summarize(mean(ride_length_mins), median(ride_length_mins))
+  group_by(start_day_name, member_casual) %>%
+  summarize(mean(ride_len_mins), median(ride_len_mins))
 ```
 We can also examine this visually (let's just examine median):
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500) %>%
-  group_by(day_name, member_casual) %>%
-  summarize(median=median(ride_length_mins)) %>%
-  ggplot(aes(x=day_name, y=median)) +
+  group_by(start_day_name, member_casual) %>%
+  summarize(median=median(ride_len_mins)) %>%
+  ggplot(aes(x=start_day_name, y=median)) +
   geom_col(aes(fill=member_casual), position="dodge")
 ```
 
@@ -612,7 +742,7 @@ Again, for monthly behavior as for daily behavior, we can by visualizing the
 counts of rides by month (heeding the aforementioned warning about the
 proportions of casual rides to member rides).
 ```{r}
-ggplot(final_data, aes(x=month)) +
+ggplot(final_data, aes(x=start_month)) +
   geom_bar(aes(fill=member_casual), position="dodge")
 ```
 Unsurprisingly, the months of December, January and February are noticeably
@@ -628,17 +758,15 @@ fact the months with maximum use for are later than for casual riders.
 Let's consider statistics by month:
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500) %>%
-  group_by(month, member_casual) %>%
-  summarize(mean=mean(ride_length_mins), median=median(ride_length_mins))
+  group_by(start_month, member_casual) %>%
+  summarize(mean=mean(ride_len_mins), median=median(ride_len_mins))
 ```
 Again, we can also visualize this (for the median):
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500) %>%
-  group_by(month, member_casual) %>%
-  summarize(median=median(ride_length_mins)) %>%
-  ggplot(aes(x=month, y=median)) +
+  group_by(start_month, member_casual) %>%
+  summarize(median=median(ride_len_mins)) %>%
+  ggplot(aes(x=start_month, y=median)) +
   geom_col(aes(fill=member_casual), position="dodge")
 ```
 As with ridership by day, it seems there are two groups of riders among casual
@@ -660,6 +788,9 @@ and color here: in the below we will use size to indicates raw count, and color
 to capture proportion.
 We make separate plots for casual rides and member rides, as otherwise the
 plots will become too small to interpret.
+This
+[stackoverflow thread](https://stackoverflow.com/questions/35994165/add-discrete-labels-to-ggplot2-plot-with-continuous-scale)
+was helpful in identifying how to set up our axes.
 ```{r}
 # Some setup for nice axis labels
 breaks <- seq(0,23,3) # Breaks to display on the axis
@@ -667,7 +798,7 @@ hrs <- c(12,3,6,9)
 # Create 12hr clock labels
 labels <- c(paste0(hrs, "AM"), paste0(hrs, "PM"))
 final_data %>%
-  filter(ride_length_mins <= 1500 & member_casual == "casual") %>%
+  filter(member_casual == "casual") %>%
   mutate(end_hour = hour(ended_at)) %>%
   ggplot(aes(x=hour, y=end_hour)) +
   geom_count(aes(color=after_stat(prop))) +
@@ -695,7 +826,7 @@ Cyclistic members.
 
 ```{r}
 final_data %>%
-  filter(ride_length_mins <= 1500 & member_casual == "member") %>%
+  filter(member_casual == "member") %>%
   mutate(end_hour = hour(ended_at)) %>%
   ggplot(aes(x=hour, y=end_hour)) +
   geom_count(aes(color=after_stat(prop))) +
@@ -716,27 +847,16 @@ present for casual rides, as well as a considerable number in the morning,
 around 8AM.
 This would be consistent with use for rides to or from work.
 
-## Geographic Behavior
-
+## Bike Type Usage
+We can examine which types of bikes
 ```{r}
 
 ```
 
-
 ## Distance Behavior
 
+## Geographic Behavior
 
-By member/casual:
-- Ride trip length stats (mean/median/min/max)...DONE
-- Trips by day - count, and trip stats (mean/median/min/max)...DONE
-- Trips by month - count, and trip stats (mean/median/min/max)...DONE
-- Trip distance - use manhattan distance (would need to add additional column)
-- Consider times of day? Added in hour to support this
-
-Plot member/casual proportions by station
-
-ADD IN START AND END HOUR, REMOVE DAY
-DELETE ROWS WITH INCORRECT lat/long
 
 # 5. Share
 
