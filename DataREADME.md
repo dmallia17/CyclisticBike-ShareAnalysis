@@ -12,8 +12,10 @@ convention of "2022MM-divvy-tripdata.csv" where MM is the 2 digit (zero padded)
 representation of the month.
 
 ## Derived files
-Running the remaining code in the R notebook will produce two additional files:
+Running the remaining code in the R notebook will produce additional files:
 - 2022-divvy-tripdata-V01.csv (an amalgamation of the 12 2022 files)
 - 2022-divvy-tripdata-V02.csv (a cleaned version of the 2022 data)
+- 2022-divvy-tripdata-V02.csv (a further cleaned and expanded version of
+the 2022 data)
 
 Refer to the ```DataChangelog.md``` file for more details.

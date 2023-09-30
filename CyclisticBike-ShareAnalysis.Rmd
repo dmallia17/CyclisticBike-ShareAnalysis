@@ -26,6 +26,9 @@ This R notebook contains my end-to-end work on the Cyclistic bike-share case
 study, performed as a "capstone" project for Google's excellent Data Analytics
 certificate program on Coursera.
 
+It is hosted in the following repository, where you can also access READMEs and
+a data changelog: https://github.com/dmallia17/CyclisticBike-ShareAnalysis
+
 The Google program recommends a data analysis process of 6 steps: ask, prepare,
 process, analyze, share and act.
 Accordingly, this notebook is structured
