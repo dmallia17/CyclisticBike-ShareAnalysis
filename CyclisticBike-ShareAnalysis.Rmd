@@ -873,6 +873,66 @@ That said, the lack of an extreme imbalance suggests no obvious obstacle, at
 least as far as these preferences go, to some casual riders becoming members.
 
 ## Distance Behavior
+Similar to our analysis of ride durations, let's try examining distances.
+Here we will need to limit our analysis to non-zero distances for, as
+mentioned in the processing stage, we could have a ride that starts and stops
+at the same station, and that would look as if the ride had gone nowhere.
+But only considering greater than zero will not be enough to capture cases
+which yield only a few inches or feet, so let's limit the results to
+American football field length: 100 yards (between endzones) or
+```{r}
+football_length_meters <- 100 * 0.9144
+```
+
+Let's check how many rows this will exclude and how it will affect each rider
+group:
+```{r}
+final_data %>%
+  group_by(member_casual) %>%
+  filter(ride_dist_meters < football_length_meters) %>%
+  summarize(count=n())
+```
+These counts aren't great but not the end of the world given our sample size,
+though we must be cautious because this exclusion does seem to affect casual
+rides more than member rides and this is the opposite of what we would
+expect based only on the overall rider type proportions (60/40 members to
+casual riders).
+
+```{r}
+final_data %>%
+  filter(ride_dist_meters >= football_length_meters) %>%
+  summarize(filtered_count=n(), min=min(ride_dist_meters),
+            max=max(ride_dist_meters), mean=mean(ride_dist_meters),
+            median=median(ride_dist_meters))
+```
+
+...and now broken down by casual riders vs. members.
+```{r}
+final_data %>%
+  filter(ride_dist_meters >= football_length_meters) %>%
+  group_by(member_casual) %>%
+  summarize(min=min(ride_dist_meters), max=max(ride_dist_meters),
+            mean=mean(ride_dist_meters), median=median(ride_dist_meters))
+```
+As with ride durations, we again have noticeable rightward skew evidenced by
+the means being considerably larger than the medians.
+
+
+Visualizing the distributions here will also be tricky, particularly given the
+outliers; let's try looking at kilometers
+```{r}
+final_data %>%
+  filter(ride_dist_meters >= football_length_meters) %>%
+  ggplot(aes(x=ride_dist_meters / 1000)) + geom_density(aes(fill=member_casual), alpha=0.5)
+```
+Given more time it would likely also be informative to consider distance in the
+context of days of the week or monthly/seasonal behavior,as we did for ride
+durations, but the above appears to conform to what we gathered from ride
+duration data.
+Members tend to be more consistent in ride patterns, with a much stronger peak
+around shorter trips, possibly commuting to or from work or local social
+events, whereas casual riders are more diverse and include longer rides,
+possibly an event in themselves (e.g. a long weekend bike ride).
 
 ## Geographic Behavior
 Initially I intended to make use of the longitude and latitude data to consider
