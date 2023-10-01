@@ -3,3 +3,4 @@
 .DS_Store
 *.RDS
 *.png
+!images/CasualStartAndEndTimes.png

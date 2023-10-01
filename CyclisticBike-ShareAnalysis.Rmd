@@ -4,23 +4,6 @@ author: "Daniel Mallia"
 output: html_notebook
 ---
 
-```{r Imports, message=FALSE}
-# Note this attaches ggplot2, lubridate, readr, stringr, dplyr and tidyr
-library(tidyverse)
-library(skimr)
-library(naniar)
-library(geosphere)
-
-# Including this line to disable a "friendly" but unhelpful warning we get
-# when grouping by multiple columns
-# https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
-options(dplyr.summarise.inform=F)
-
-# Set this to false if you want to download everything for the first time
-DOWNLOADED <- TRUE
-```
-
-
 # Purpose
 This R notebook contains my end-to-end work on the Cyclistic bike-share case
 study, performed as a "capstone" project for Google's excellent Data Analytics
@@ -37,6 +20,25 @@ around those steps.
 Please note that some inspiration for the below work comes from an R script,
 which was provided in the course and is based on 
 [this blog](https://artscience.blog/home/divvy-dataviz-case-study).
+
+```{r Imports, warning=FALSE, message=FALSE}
+# Note this attaches ggplot2, lubridate, readr, stringr, dplyr and tidyr
+library(tidyverse)
+library(skimr)
+library(naniar)
+library(geosphere)
+
+# Including this line to disable a "friendly" but unhelpful warning we get
+# when grouping by multiple columns
+# https://stackoverflow.com/questions/62140483/how-to-interpret-dplyr-message-summarise-regrouping-output-by-x-override
+options(dplyr.summarise.inform=F)
+
+# Set this to false if you want to download everything for the first time
+DOWNLOADED <- TRUE
+# Set this to true if you need to rewrite files (e.g. false is for when
+# you just need to rerun chunks for output)
+REWRITE <- FALSE
+```
 
 # 1. Ask
 Let's start by briefly spelling out the (fictional) scenario for this case study
@@ -210,7 +212,9 @@ all_tripdata <- bind_rows(tripdata_by_month)
 We can save this result as a file, so we don't need to repeat these steps in
 the future.
 ```{r}
-write_csv(all_tripdata, "2022-divvy-tripdata-V01.csv")
+if(REWRITE) {
+  write_csv(all_tripdata, "2022-divvy-tripdata-V01.csv")
+}
 ```
 
 # 3. Process
@@ -451,7 +455,9 @@ gg_miss_upset(all_tripdata_v2, nsets=6)
 
 Here we write out the intermediate result after our processing and cleaning.
 ```{r}
-write_csv(all_tripdata_v2, "2022-divvy-tripdata-V02.csv")
+if(REWRITE) {
+  write_csv(all_tripdata_v2, "2022-divvy-tripdata-V02.csv")
+}
 ```
 
 In addition, for resuming our work in this notebook it is best to save out the
@@ -460,7 +466,9 @@ Otherwise, if we try to reload the data only from csv, we will need to do
 extra work to convert day_name and month back into ordered form, as they will
 be interpreted as just characters.
 ```{r}
-saveRDS(all_tripdata_v2, "2022-divvy-tripdata-V02.RDS")
+if(REWRITE) {
+  saveRDS(all_tripdata_v2, "2022-divvy-tripdata-V02.RDS")
+}
 ```
 
 ## Additional Cleaning and Calculations - 9/29/2023
@@ -627,8 +635,10 @@ all_tripdata_v3 <- all_tripdata_v3 %>%
 
 Now we can write out this refined dataset.
 ```{r}
-write_csv(all_tripdata_v3, "2022-divvy-tripdata-V03.csv")
-saveRDS(all_tripdata_v3, "2022-divvy-tripdata-V03.RDS")
+if(REWRITE) {
+  write_csv(all_tripdata_v3, "2022-divvy-tripdata-V03.csv")
+  saveRDS(all_tripdata_v3, "2022-divvy-tripdata-V03.RDS")
+}
 ```
 
 # 4. Analyze
@@ -1075,20 +1085,32 @@ the coldest months - suggests that there may indeed be a group of riders among
 casual riders, who might consider becoming members.
 
 # 6. Act
+The act phase in this scenario consists of two items: (1) my top three
+recommendations and (2) sharing this analysis with the wider world!
 
-Todo:
-- Recommendations
-- Put Github profile link
-- Put on Github profile
+My recommendations are the following:
 
-- Need more information about the rider types and information from the
-riders themselves:
-  - How many of the casual riders are single ride vs daily pass?
-  - What is their primary reason for using the bike?
-  - Have they considered becoming a member and if so, why have they not done
-  so already? Would want to know if it is an issue such as a lack of reliable
-  access to their preferred bike type
-- Need a financial breakdown
+1. Collect survey data: a key question that needs to be answered here is if
+casual riders have ever considered becoming a member and if so, why they have
+not done so already? The above findings suggest there may already be many
+casual riders who are a good fit, and this will give some key insight as to
+whether it is a matter of awareness, pricing or perhaps another issue such as
+unavailability of their favorite bike type. It would also be great to know
+exactly why they are using a bike, such as for commuting to work.
+2. Gather bike path information and conduct geographical analysis: by examining
+ride patterns by location, insight may be gained into how much suitability for
+bikes is influencing usage patterns as well as how awareness has perhaps not
+grown in areas where stations are new.
+3. Create a cost-benefit breakdown for users: The above two steps will help
+identify the exact types of casual riders that may be influenced, and the areas
+to focus efforts, but moving forward will require cost analysis that could
+produce concrete recommendations in the form of "If you take X rides in a week,
+you would save money by becoming a member!"
+
+For sharing, this work will be hosted on
+[my website](https://dmallia17.github.io) (there's a good chance that's how
+you found it!), as a projects item linking to the repository and as a standalone
+page showing this notebook in all its beauty.
 
 # 7. Future Work
 Few projects are ever really complete, and this one is no exception.
